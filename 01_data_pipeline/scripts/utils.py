@@ -8,6 +8,7 @@ import os
 import sqlite3
 from sqlite3 import Error
 from constants import *
+from Maps.city_tier import city_tier_mapping
 
 
 ###############################################################################
@@ -82,7 +83,7 @@ def load_data_into_db(DB_FILE_NAME, DB_PATH, DATA_DIRECTORY):
     SAMPLE USAGE
         load_data_into_db()
     """
-    # load the data present in data directory to the db
+    # read the data present in data directory
     df = pd.read_csv(DATA_DIRECTORY)
 
     # replace any null values present in 'toal_leads_dropped' and
