@@ -7,22 +7,24 @@ import pandas as pd
 import os
 import sqlite3
 from sqlite3 import Error
+from constants import *
 
 
 ###############################################################################
 # Define the function to build database
 ###############################################################################
 
-def build_dbs():
-    '''
-    This function checks if the db file with specified name is present 
-    in the /Assignment/01_data_pipeline/scripts folder. If it is not present it creates 
-    the db file with the given name at the given path. 
+
+def build_dbs(DB_FILE_NAME, DB_PATH):
+    """
+    This function checks if the db file with specified name is present
+    in the /Assignment/01_data_pipeline/scripts folder. If it is not present it creates
+    the db file with the given name at the given path.
 
 
     INPUTS
         DB_FILE_NAME : Name of the database file 'utils_output.db'
-        DB_PATH : path where the db file should exist  
+        DB_PATH : path where the db file should exist
 
 
     OUTPUT
@@ -31,22 +33,33 @@ def build_dbs():
                 prints 'DB Already Exists' and returns 'DB Exists'
 
         2. If the db file is not present at the specified loction
-                prints 'Creating Database' and creates the sqlite db 
-                file at the specified path with the specified name and 
-                once the db file is created prints 'New DB Created' and 
+                prints 'Creating Database' and creates the sqlite db
+                file at the specified path with the specified name and
+                once the db file is created prints 'New DB Created' and
                 returns 'DB created'
 
 
     SAMPLE USAGE
         build_dbs()
-    '''
+    """
+    # check if the db file is present at the specified path
+    if os.path.isfile(DB_PATH + "/" + DB_FILE_NAME):
+        print("DB Already Exists")
+        return "DB Exists"
+    else:
+        # create the db file at the specified path with the specified name
+        conn = sqlite3.connect(DB_PATH + "/" + DB_FILE_NAME)
+        print("Creating Database")
+        return "DB created"
+
 
 ###############################################################################
 # Define function to load the csv file to the database
 ###############################################################################
 
-def load_data_into_db():
-    '''
+
+def load_data_into_db(DB_FILE_NAME, DB_PATH, DATA_DIRECTORY):
+    """
     Thie function loads the data present in data directory into the db
     which was created previously.
     It also replaces any null values present in 'toal_leads_dropped' and
@@ -56,31 +69,49 @@ def load_data_into_db():
     INPUTS
         DB_FILE_NAME : Name of the database file
         DB_PATH : path where the db file should be
-        DATA_DIRECTORY : path of the directory where 'leadscoring.csv' 
+        DATA_DIRECTORY : path of the directory where 'leadscoring.csv'
                         file is present
-        
+
 
     OUTPUT
         Saves the processed dataframe in the db in a table named 'loaded_data'.
-        If the table with the same name already exsists then the function 
+        If the table with the same name already exsists then the function
         replaces it.
 
 
     SAMPLE USAGE
         load_data_into_db()
-    '''
+    """
+    # load the data present in data directory to the db
+    df = pd.read_csv(DATA_DIRECTORY)
+
+    # replace any null values present in 'toal_leads_dropped' and
+    # 'referred_lead' columns with 0
+    df["toal_leads_dropped"].fillna(0, inplace=True)
+    df["referred_lead"].fillna(0, inplace=True)
+
+    # save the processed dataframe in the db in a table named 'loaded_data'
+    df.to_sql(
+        "loaded_data",
+        con=sqlite3.connect(DB_PATH + "/" + DB_FILE_NAME),
+        index=False,
+        if_exists="replace",
+    )
+
+    print("Data loaded into db")
+    return
 
 
 ###############################################################################
 # Define function to map cities to their respective tiers
 ###############################################################################
 
-    
+
 def map_city_tier():
-    '''
+    """
     This function maps all the cities to their respective tier as per the
     mappings provided in the city_tier_mapping.py file. If a
-    particular city's tier isn't mapped(present) in the city_tier_mapping.py 
+    particular city's tier isn't mapped(present) in the city_tier_mapping.py
     file then the function maps that particular city to 3.0 which represents
     tier-3.
 
@@ -90,17 +121,18 @@ def map_city_tier():
         DB_PATH : path where the db file should be
         city_tier_mapping : a dictionary that maps the cities to their tier
 
-    
+
     OUTPUT
         Saves the processed dataframe in the db in a table named
-        'city_tier_mapped'. If the table with the same name already 
+        'city_tier_mapped'. If the table with the same name already
         exsists then the function replaces it.
 
-    
+
     SAMPLE USAGE
         map_city_tier()
 
-    '''
+    """
+
 
 ###############################################################################
 # Define function to map insignificant categorial variables to "others"
@@ -108,12 +140,12 @@ def map_city_tier():
 
 
 def map_categorical_vars():
-    '''
+    """
     This function maps all the insignificant variables present in 'first_platform_c'
     'first_utm_medium_c' and 'first_utm_source_c'. The list of significant variables
-    should be stored in a python file in the 'significant_categorical_level.py' 
+    should be stored in a python file in the 'significant_categorical_level.py'
     so that it can be imported as a variable in utils file.
-    
+
 
     INPUTS
         DB_FILE_NAME : Name of the database file
@@ -127,26 +159,26 @@ def map_categorical_vars():
                  file. The significant levels are calculated by taking top 90
                  percentils of all the levels. For more information refer
                  'data_cleaning.ipynb' notebook.
-  
+
 
     OUTPUT
         Saves the processed dataframe in the db in a table named
-        'categorical_variables_mapped'. If the table with the same name already 
+        'categorical_variables_mapped'. If the table with the same name already
         exsists then the function replaces it.
 
-    
+
     SAMPLE USAGE
         map_categorical_vars()
-    '''
+    """
 
 
 ##############################################################################
 # Define function that maps interaction columns into 4 types of interactions
 ##############################################################################
 def interactions_mapping():
-    '''
+    """
     This function maps the interaction columns into 4 unique interaction columns
-    These mappings are present in 'interaction_mapping.csv' file. 
+    These mappings are present in 'interaction_mapping.csv' file.
 
 
     INPUTS
@@ -159,26 +191,24 @@ def interactions_mapping():
         INDEX_COLUMNS_INFERENCE: list of columns to be used as index while pivoting and
                                  unpivoting during inference
         NOT_FEATURES: Features which have less significance and needs to be dropped
-                                 
+
         NOTE : Since while inference we will not have 'app_complete_flag' which is
-        our label, we will have to exculde it from our features list. It is recommended 
-        that you use an if loop and check if 'app_complete_flag' is present in 
-        'categorical_variables_mapped' table and if it is present pass a list with 
+        our label, we will have to exculde it from our features list. It is recommended
+        that you use an if loop and check if 'app_complete_flag' is present in
+        'categorical_variables_mapped' table and if it is present pass a list with
         'app_complete_flag' column, or else pass a list without 'app_complete_flag'
         column.
 
-    
+
     OUTPUT
-        Saves the processed dataframe in the db in a table named 
-        'interactions_mapped'. If the table with the same name already exsists then 
+        Saves the processed dataframe in the db in a table named
+        'interactions_mapped'. If the table with the same name already exsists then
         the function replaces it.
-        
-        It also drops all the features that are not requried for training model and 
+
+        It also drops all the features that are not requried for training model and
         writes it in a table named 'model_input'
 
-    
+
     SAMPLE USAGE
         interactions_mapping()
-    '''
-    
-   
+    """
