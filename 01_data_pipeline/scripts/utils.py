@@ -8,7 +8,7 @@ import os
 import sqlite3
 from sqlite3 import Error
 from constants import *
-from Maps.city_tier import city_tier_mapping
+from city_tier_mapping import city_tier_mapping
 
 
 ###############################################################################
@@ -16,7 +16,7 @@ from Maps.city_tier import city_tier_mapping
 ###############################################################################
 
 
-def build_dbs(DB_FILE_NAME, DB_PATH):
+def build_dbs():
     """
     This function checks if the db file with specified name is present
     in the /Assignment/01_data_pipeline/scripts folder. If it is not present it creates
@@ -43,15 +43,24 @@ def build_dbs(DB_FILE_NAME, DB_PATH):
     SAMPLE USAGE
         build_dbs()
     """
-    # check if the db file is present at the specified path
     if os.path.isfile(DB_PATH + "/" + DB_FILE_NAME):
-        print("DB Already Exists")
-        return "DB Exists"
+        print("DB Already Exsist")
+        return "DB Exsists"
     else:
-        # create the db file at the specified path with the specified name
-        conn = sqlite3.connect(DB_PATH + "/" + DB_FILE_NAME)
         print("Creating Database")
-        return "DB created"
+        """ create a database connection to a SQLite database """
+        print(DB_PATH + "/" + DB_FILE_NAME)
+        conn = None
+        try:
+            conn = sqlite3.connect(DB_PATH + "/" + DB_FILE_NAME)
+            print("New DB Created")
+        except Error as e:
+            print("Error", e)
+            return "Error"
+        finally:
+            if conn:
+                conn.close()
+                return "DB Created"
 
 
 ###############################################################################
@@ -59,11 +68,11 @@ def build_dbs(DB_FILE_NAME, DB_PATH):
 ###############################################################################
 
 
-def load_data_into_db(DB_FILE_NAME, DB_PATH, DATA_DIRECTORY):
+def load_data_into_db():
     """
     Thie function loads the data present in data directory into the db
     which was created previously.
-    It also replaces any null values present in 'toal_leads_dropped' and
+    It also replaces any null values present in 'total_leads_droppped' and
     'referred_lead' columns with 0.
 
 
@@ -86,9 +95,9 @@ def load_data_into_db(DB_FILE_NAME, DB_PATH, DATA_DIRECTORY):
     # read the data present in data directory
     df = pd.read_csv(DATA_DIRECTORY)
 
-    # replace any null values present in 'toal_leads_dropped' and
+    # replace any null values present in 'total_leads_droppped' and
     # 'referred_lead' columns with 0
-    df["toal_leads_dropped"].fillna(0, inplace=True)
+    df["total_leads_droppped"].fillna(0, inplace=True)
     df["referred_lead"].fillna(0, inplace=True)
 
     # save the processed dataframe in the db in a table named 'loaded_data'
@@ -103,12 +112,13 @@ def load_data_into_db(DB_FILE_NAME, DB_PATH, DATA_DIRECTORY):
     return
 
 
+load_data_into_db()
 ###############################################################################
 # Define function to map cities to their respective tiers
 ###############################################################################
 
 
-def map_city_tier():
+def map_city_tier(DB_FILE_NAME, DB_PATH):
     """
     This function maps all the cities to their respective tier as per the
     mappings provided in the city_tier_mapping.py file. If a
@@ -133,6 +143,29 @@ def map_city_tier():
         map_city_tier()
 
     """
+    # read the city_tier_mapping.py file
+    city_tier_mapping = pd.read_csv(
+        "/mlflow-assignment/01_data_pipeline/scripts/city_tier_mapping.py"
+    )
+
+    # read the db file
+    conn = sqlite3.connect(DB_PATH + "/" + DB_FILE_NAME)
+    df = pd.read_sql_query("SELECT * FROM loaded_data", conn)
+
+    # create a new column 'city_tier'
+    df["city_tier"] = df["city"].map(city_tier_mapping)
+
+    # replace any null values present in 'city_tier' column with 3.0
+    df["city_tier"].fillna(3.0, inplace=True)
+
+    # save the processed dataframe in the db in a table named 'city_tier_mapped'
+    df.to_sql(
+        "city_tier_mapped",
+        con=sqlite3.connect(DB_PATH + "/" + DB_FILE_NAME),
+        index=False,
+        if_exists="replace",
+    )
+    return
 
 
 ###############################################################################
@@ -140,7 +173,9 @@ def map_city_tier():
 ###############################################################################
 
 
-def map_categorical_vars():
+def map_categorical_vars(
+    DB_FILE_NAME, DB_PATH, list_platform, list_medium, list_source
+):
     """
     This function maps all the insignificant variables present in 'first_platform_c'
     'first_utm_medium_c' and 'first_utm_source_c'. The list of significant variables
@@ -171,12 +206,41 @@ def map_categorical_vars():
     SAMPLE USAGE
         map_categorical_vars()
     """
+    # read the db file
+    conn = sqlite3.connect(DB_PATH + "/" + DB_FILE_NAME)
+    df = pd.read_sql_query("SELECT * FROM loaded_data", conn)
+
+    # create a new column 'first_platform_c'
+    df["first_platform_c"] = df["first_platform"].map(list_platform)
+
+    # create a new column 'first_utm_medium_c'
+    df["first_utm_medium_c"] = df["first_utm_medium"].map(list_medium)
+
+    # create a new column 'first_utm_source_c'
+    df["first_utm_source_c"] = df["first_utm_source"].map(list_source)
+
+    # save the processed dataframe in the db in a table named
+    # 'categorical_variables_mapped'
+    df.to_sql(
+        "categorical_variables_mapped",
+        con=sqlite3.connect(DB_PATH + "/" + DB_FILE_NAME),
+        index=False,
+        if_exists="replace",
+    )
+    return
 
 
 ##############################################################################
 # Define function that maps interaction columns into 4 types of interactions
 ##############################################################################
-def interactions_mapping():
+def interactions_mapping(
+    DB_FILE_NAME,
+    DB_PATH,
+    INTERACTION_MAPPING,
+    INDEX_COLUMNS_TRAINING,
+    INDEX_COLUMNS_INFERENCE,
+    NOT_FEATURES,
+):
     """
     This function maps the interaction columns into 4 unique interaction columns
     These mappings are present in 'interaction_mapping.csv' file.
