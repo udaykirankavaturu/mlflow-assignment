@@ -353,6 +353,3 @@ def interactions_mapping():
         if conn:
             conn.close()
             return "Completed"
-
-
-interactions_mapping()

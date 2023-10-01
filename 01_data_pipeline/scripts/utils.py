@@ -9,6 +9,7 @@ import sqlite3
 from sqlite3 import Error
 from constants import *
 from city_tier_mapping import city_tier_mapping
+from significant_categorical_level import *
 
 
 ###############################################################################
@@ -43,16 +44,16 @@ def build_dbs():
     SAMPLE USAGE
         build_dbs()
     """
-    if os.path.isfile(DB_PATH + "/" + DB_FILE_NAME):
+    if os.path.isfile(DB_PATH + DB_FILE_NAME):
         print("DB Already Exsist")
         return "DB Exsists"
     else:
         print("Creating Database")
         """ create a database connection to a SQLite database """
-        print(DB_PATH + "/" + DB_FILE_NAME)
+        print(DB_PATH + DB_FILE_NAME)
         conn = None
         try:
-            conn = sqlite3.connect(DB_PATH + "/" + DB_FILE_NAME)
+            conn = sqlite3.connect(DB_PATH + DB_FILE_NAME)
             print("New DB Created")
         except Error as e:
             print("Error", e)
@@ -92,33 +93,41 @@ def load_data_into_db():
     SAMPLE USAGE
         load_data_into_db()
     """
-    # read the data present in data directory
-    df = pd.read_csv(DATA_DIRECTORY)
+    try:
+        conn = sqlite3.connect(DB_PATH + DB_FILE_NAME)
+        # read the data present in data directory
+        df = pd.read_csv(DATA_DIRECTORY)
 
-    # replace any null values present in 'total_leads_droppped' and
-    # 'referred_lead' columns with 0
-    df["total_leads_droppped"].fillna(0, inplace=True)
-    df["referred_lead"].fillna(0, inplace=True)
+        # replace any null values present in 'total_leads_droppped' and
+        # 'referred_lead' columns with 0
+        df["total_leads_droppped"].fillna(0, inplace=True)
+        df["referred_lead"].fillna(0, inplace=True)
 
-    # save the processed dataframe in the db in a table named 'loaded_data'
-    df.to_sql(
-        "loaded_data",
-        con=sqlite3.connect(DB_PATH + "/" + DB_FILE_NAME),
-        index=False,
-        if_exists="replace",
-    )
+        # save the processed dataframe in the db in a table named 'loaded_data'
+        df.to_sql(
+            "loaded_data",
+            conn,
+            index=False,
+            if_exists="replace",
+        )
 
-    print("Data loaded into db")
-    return
+        print("Data loaded into db")
+        return
+    except Error as e:
+        print("Error", e)
+        return "Error"
+    finally:
+        if conn:
+            conn.close()
+            return "Completed"
 
 
-load_data_into_db()
 ###############################################################################
 # Define function to map cities to their respective tiers
 ###############################################################################
 
 
-def map_city_tier(DB_FILE_NAME, DB_PATH):
+def map_city_tier():
     """
     This function maps all the cities to their respective tier as per the
     mappings provided in the city_tier_mapping.py file. If a
@@ -143,29 +152,31 @@ def map_city_tier(DB_FILE_NAME, DB_PATH):
         map_city_tier()
 
     """
-    # read the city_tier_mapping.py file
-    city_tier_mapping = pd.read_csv(
-        "/mlflow-assignment/01_data_pipeline/scripts/city_tier_mapping.py"
-    )
+    try:
+        # read the db file
+        conn = sqlite3.connect(DB_PATH + DB_FILE_NAME)
+        df = pd.read_sql_query("SELECT * FROM loaded_data", conn)
 
-    # read the db file
-    conn = sqlite3.connect(DB_PATH + "/" + DB_FILE_NAME)
-    df = pd.read_sql_query("SELECT * FROM loaded_data", conn)
+        # create 'city_tier' column
+        df["city_tier"] = df["city_mapped"].map(city_tier_mapping)
 
-    # create a new column 'city_tier'
-    df["city_tier"] = df["city"].map(city_tier_mapping)
+        # map null values with tier 3
+        df["city_tier"].fillna(3.0, inplace=True)
 
-    # replace any null values present in 'city_tier' column with 3.0
-    df["city_tier"].fillna(3.0, inplace=True)
+        # drop the original column
+        df.drop(["city_mapped"], axis=1, inplace=True)
 
-    # save the processed dataframe in the db in a table named 'city_tier_mapped'
-    df.to_sql(
-        "city_tier_mapped",
-        con=sqlite3.connect(DB_PATH + "/" + DB_FILE_NAME),
-        index=False,
-        if_exists="replace",
-    )
-    return
+        # save updated dataframe back to database
+        df.to_sql("city_tier_mapped", conn, index=False, if_exists="replace")
+        print("city tier mapping completed")
+        return
+    except Error as e:
+        print("Error", e)
+        return "Error"
+    finally:
+        if conn:
+            conn.close()
+            return "Completed"
 
 
 ###############################################################################
@@ -173,9 +184,7 @@ def map_city_tier(DB_FILE_NAME, DB_PATH):
 ###############################################################################
 
 
-def map_categorical_vars(
-    DB_FILE_NAME, DB_PATH, list_platform, list_medium, list_source
-):
+def map_categorical_vars():
     """
     This function maps all the insignificant variables present in 'first_platform_c'
     'first_utm_medium_c' and 'first_utm_source_c'. The list of significant variables
@@ -206,41 +215,62 @@ def map_categorical_vars(
     SAMPLE USAGE
         map_categorical_vars()
     """
-    # read the db file
-    conn = sqlite3.connect(DB_PATH + "/" + DB_FILE_NAME)
-    df = pd.read_sql_query("SELECT * FROM loaded_data", conn)
+    try:
+        conn = sqlite3.connect(DB_PATH + DB_FILE_NAME)
 
-    # create a new column 'first_platform_c'
-    df["first_platform_c"] = df["first_platform"].map(list_platform)
+        df_lead_scoring = pd.read_sql("select * from city_tier_mapped", conn)
 
-    # create a new column 'first_utm_medium_c'
-    df["first_utm_medium_c"] = df["first_utm_medium"].map(list_medium)
+        new_df = df_lead_scoring[
+            ~df_lead_scoring["first_platform_c"].isin(list_platform)
+        ]
+        # replace the value of these levels to others
+        new_df["first_platform_c"] = "others"
+        old_df = df_lead_scoring[
+            df_lead_scoring["first_platform_c"].isin(list_platform)
+        ]  # get rows for levels which are present in list_platform
+        # concatenate new_df and old_df to get the final dataframe
+        df = pd.concat([new_df, old_df])
 
-    # create a new column 'first_utm_source_c'
-    df["first_utm_source_c"] = df["first_utm_source"].map(list_source)
+        # get rows for levels which are not present in list_medium
+        new_df = df[~df["first_utm_medium_c"].isin(list_medium)]
+        # replace the value of these levels to others
+        new_df["first_utm_medium_c"] = "others"
+        # get rows for levels which are present in list_medium
+        old_df = df[df["first_utm_medium_c"].isin(list_medium)]
+        # concatenate new_df and old_df to get the final dataframe
+        df = pd.concat([new_df, old_df])
 
-    # save the processed dataframe in the db in a table named
-    # 'categorical_variables_mapped'
-    df.to_sql(
-        "categorical_variables_mapped",
-        con=sqlite3.connect(DB_PATH + "/" + DB_FILE_NAME),
-        index=False,
-        if_exists="replace",
-    )
-    return
+        # get rows for levels which are not present in list_source
+        new_df = df[~df["first_utm_source_c"].isin(list_source)]
+        # replace the value of these levels to others
+        new_df["first_utm_source_c"] = "others"
+        # get rows for levels which are present in list_source
+        old_df = df[df["first_utm_source_c"].isin(list_source)]
+        # concatenate new_df and old_df to get the final dataframe
+        df = pd.concat([new_df, old_df])
+
+        df = df.drop_duplicates()
+
+        df.to_sql(
+            name="categorical_variables_mapped",
+            con=conn,
+            if_exists="replace",
+            index=False,
+        )
+        print("Categorical variables mapped")
+    except Error as e:
+        print("Error", e)
+        return "Error"
+    finally:
+        if conn:
+            conn.close()
+            return "Completed"
 
 
 ##############################################################################
 # Define function that maps interaction columns into 4 types of interactions
 ##############################################################################
-def interactions_mapping(
-    DB_FILE_NAME,
-    DB_PATH,
-    INTERACTION_MAPPING,
-    INDEX_COLUMNS_TRAINING,
-    INDEX_COLUMNS_INFERENCE,
-    NOT_FEATURES,
-):
+def interactions_mapping():
     """
     This function maps the interaction columns into 4 unique interaction columns
     These mappings are present in 'interaction_mapping.csv' file.
@@ -277,3 +307,50 @@ def interactions_mapping(
     SAMPLE USAGE
         interactions_mapping()
     """
+    try:
+        conn = sqlite3.connect(DB_PATH + DB_FILE_NAME)
+
+        df = pd.read_sql("select * from categorical_variables_mapped", conn)
+
+        if "app_complete_flag" in df.columns:
+            index_variable = INDEX_COLUMNS_TRAINING
+        else:
+            index_variable = INDEX_COLUMNS_INFERENCE
+
+        df_event_mapping = pd.read_csv(INTERACTION_MAPPING, index_col=[0])
+        df_unpivot = pd.melt(
+            df,
+            id_vars=index_variable,
+            var_name="interaction_type",
+            value_name="interaction_value",
+        )
+        df_unpivot["interaction_value"] = df_unpivot["interaction_value"].fillna(0)
+        df = pd.merge(df_unpivot, df_event_mapping, on="interaction_type", how="left")
+        df = df.drop(["interaction_type"], axis=1)
+        df_pivot = df.pivot_table(
+            values="interaction_value",
+            index=index_variable,
+            columns="interaction_mapping",
+            aggfunc="sum",
+        )
+        df_pivot = df_pivot.reset_index()
+
+        df_pivot.to_sql(
+            name="interactions_mapped", con=conn, if_exists="replace", index=False
+        )
+
+        df_model_input = df_pivot.drop(NOT_FEATURES, axis=1)
+        df_model_input.to_sql(
+            name="model_input", con=conn, if_exists="replace", index=False
+        )
+        print("Interactions mapped")
+    except Error as e:
+        print("Error", e)
+        return "Error"
+    finally:
+        if conn:
+            conn.close()
+            return "Completed"
+
+
+interactions_mapping()
